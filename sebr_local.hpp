@@ -339,7 +339,7 @@ class ThreadGroup {
                   bytes_gc_threshold(bytes_gc_threshold),
                   bytes_epoch_threshold(bytes_epoch_threshold) {}
 
-        decltype(auto) get_thread_handle(ThreadGroup<T>* group) {
+        ThreadHandle* get_thread_handle(ThreadGroup<T>* group) {
             auto iter = handles_table.find(group);
             if (iter == handles_table.end()) {
                 auto control = new ConcurrencyControl();
