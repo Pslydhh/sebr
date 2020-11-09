@@ -118,17 +118,17 @@ public:
     }
 
     static bool is_tagged(T* addr) {
-        return reinterpret_cast<long>(addr->next.load()) & static_cast<long>(1);
+        return reinterpret_cast<uintptr_t>(addr->next.load()) & static_cast<uintptr_t>(1);
     }
 
     static bool is_not_tagged(T* addr) { return !is_tagged(addr); }
 
     static T* tagged_address(T* plain_addr) {
-        return reinterpret_cast<T*>(reinterpret_cast<long>(plain_addr) | static_cast<long>(1));
+        return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(plain_addr) | static_cast<uintptr_t>(1));
     }
 
     static T* untagged_address(T* tagged_addr) {
-        return reinterpret_cast<T*>(reinterpret_cast<long>(tagged_addr) & static_cast<long>(~1));
+        return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(tagged_addr) & static_cast<uintptr_t>(~1));
     }
 
     T* sentinel;
