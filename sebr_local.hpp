@@ -201,7 +201,6 @@ class PackedHandle {
 public:
     template <typename T>
     PackedHandle(ConcurrentBridge<T>* bridge);
-    PackedHandle& update();
 
     template <typename T, typename... Args>
     void retire(long bytes, Args&&... args);
@@ -259,6 +258,7 @@ public:
         reclaim(bytes_gc_threshold);
         return this;
     }
+
     void try_increase_epoch(long bytes, std::atomic<long>* globalEpoch) {
         if ((bytes_accumulate += bytes) - epoch_add_lastbytes > bytes_epoch_threshold) {
             globalEpoch->fetch_add(1);
@@ -427,7 +427,6 @@ public:
 template <typename T>
 class ConcurrentBridge {
     friend class PackedHandle;
-
 public:
     ConcurrentBridge(int bytes_gc_threshold = 8192, int bytes_epoch_threshold = 1024)
             : group(new ThreadGroup<T>(bytes_gc_threshold, bytes_epoch_threshold)) {}
@@ -494,11 +493,6 @@ private:
 template <typename T>
 PackedHandle::PackedHandle(ConcurrentBridge<T>* bridge) : owed(bridge->group->bind()) {
     owed->lock_guard();
-}
-
-PackedHandle& PackedHandle::update() {
-    owed->lock_guard();
-    return *this;
 }
 
 template <typename T, typename... Args>
