@@ -384,14 +384,11 @@ class ThreadGroup {
         };
          */
     public:
-        ThreadHandleAggregate(std::atomic<long>* global_epoch,
-                              int bytes_gc_threshold, int bytes_epoch_threshold)
-                : handles_table(),
-                  global_epoch(global_epoch),
-                  bytes_gc_threshold(bytes_gc_threshold),
-                  bytes_epoch_threshold(bytes_epoch_threshold) {}
+        ThreadHandleAggregate()
+                : handles_table() {}
 
-        ThreadHandle* get_thread_handle(ThreadGroup<T>* group, ThreadHandle* sentinel) {
+        ThreadHandle* get_thread_handle(ThreadGroup<T>* group, ThreadHandle* sentinel, std::atomic<long>* global_epoch,
+                                        int bytes_gc_threshold, int bytes_epoch_threshold) {
             auto iter = handles_table.find(group);
             if (iter == handles_table.end()) {
                 auto control = new ConcurrencyControl();
@@ -426,9 +423,6 @@ class ThreadGroup {
         }
 
         std::unordered_map<ThreadGroup<T>*, HandleWithControl> handles_table;
-        std::atomic<long>* global_epoch;
-        const int bytes_gc_threshold;
-        const int bytes_epoch_threshold;
     };
 
 public:
@@ -447,9 +441,8 @@ public:
               handle_total(0) {}
 
     ThreadHandle* bind() {
-        thread_local ThreadHandleAggregate aggregate(&global_epoch, bytes_gc_threshold,
-                                                     bytes_epoch_threshold);
-        ThreadHandle* handle = aggregate.get_thread_handle(this, &sentinel);
+        thread_local ThreadHandleAggregate aggregate;
+        ThreadHandle* handle = aggregate.get_thread_handle(this, &sentinel, &global_epoch, bytes_gc_threshold, bytes_epoch_threshold);
         return handle;
     }
 
