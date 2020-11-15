@@ -343,46 +343,7 @@ class ThreadGroup {
             ThreadHandle* handle;
             ConcurrencyControl* control;
         };
-        /*
-        class CompulsiveMap {
-         public:
-            std::vector<std::pair<uintptr_t, HandleWithControl>> array;
-            int size;
-        
-            CompulsiveMap() : array(), size(1) {
-                array.resize(1);
-            }
-            
-            std::pair<uintptr_t, HandleWithControl> find(T* g) {
-                uintptr_t key = reinterpret_cast<uintptr_t> (g);
-                std::pair<uintptr_t, HandleWithControl> pair;
-                
-                for (;;) {
-                    if ((pair = array[key & (size - 1)]).first == 0) {
-                        return std::pair<uintptr_t, HandleWithControl>(0, HandleWithControl());
-                    } else if ((pair = array[key & (size - 1)]).first != key) {
-                        std::vector<std::pair<uintptr_t, HandleWithControl>> array_new;
-                        array_new.resize(2 * size);
-                        for (auto it = array.begin(); it != array.end(); ++it) {
-                            array_new[it->first & (2 * size - 1)] = *it;
-                        }
-                        array_new.swap(array);
-                        size *= 2;
-                    } else {
-                        return pair;
-                    }
-                }
-            }
-            
-            std::pair<uintptr_t, HandleWithControl> end() {
-                return std::pair<uintptr_t, HandleWithControl>(0, HandleWithControl());
-            }
-            
-            void insert(std::pair<uintptr_t, HandleWithControl>&& pair) {
-                array[pair->first & (size - 1)] = pair;
-            }
-        };
-         */
+
     public:
         ThreadHandleAggregate()
                 : handles_table() {}
@@ -390,7 +351,20 @@ class ThreadGroup {
         ThreadHandle* get_thread_handle(ThreadGroup<T>* group, ThreadHandle* sentinel, std::atomic<long>* global_epoch,
                                         int bytes_gc_threshold, int bytes_epoch_threshold) {
             auto iter = handles_table.find(group);
-            if (iter == handles_table.end()) {
+            int flag = 0;
+            if (iter != handles_table.end() && (flag = iter->second.control->flag.load()) == 0) {
+                return iter->second.handle;
+            } else {
+                // Dirty reading
+                if (flag != 0) {
+                    assert(flag < 0);
+                    // this means the last data struct object but 
+                    // have the same address, so we must 
+                    // clean it.f just delete control.
+                    iter->second.control->blocking.park();
+                    delete iter->second.control;
+                }
+
                 auto control = new ConcurrencyControl();
                 auto handle = new ThreadHandle(sentinel, global_epoch, bytes_gc_threshold,
                                                bytes_epoch_threshold, control);
@@ -398,7 +372,6 @@ class ThreadGroup {
                 group->handle_total.fetch_add(1);
                 return handle;
             }
-            return iter->second.handle;
         }
 
         ~ThreadHandleAggregate() {
