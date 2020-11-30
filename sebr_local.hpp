@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
 #include <algorithm>
 #include <atomic>
 #include <cassert>
@@ -350,30 +348,36 @@ class ThreadGroup {
         ThreadHandleAggregate()
                 : handles_table() {}
 
+        void clean_local_handles() {
+            for (auto iter = handles_table.begin(); iter != handles_table.end(); ++iter) {
+                if (iter->second.control->flag.load() < 0) {
+                    handles_table.erase(iter);
+                }
+            }
+        }
+
         ThreadHandle* get_thread_handle(ThreadGroup<T>* group, ThreadHandle* sentinel, std::atomic<long>* global_epoch,
                                         int bytes_gc_threshold, int bytes_epoch_threshold) {
             auto iter = handles_table.find(group);
-            int flag = 0;
-            if (iter != handles_table.end() && (flag = iter->second.control->flag.load()) == 0) {
-                return iter->second.handle;
-            } else {
-                // Dirty reading
-                if (flag != 0) {
+            if (iter != handles_table.end()) {
+                int flag;
+                if ((flag = iter->second.control->flag.load()) == 0) {
+                    return iter->second.handle;
+                } else {
                     assert(flag < 0);
-                    // this means the last data struct object but 
-                    // have the same address, so we must 
-                    // clean it.f just delete control.
-                    iter->second.control->blocking.park();
-                    delete iter->second.control;
                 }
-
-                auto control = new ConcurrencyControl();
-                auto handle = new ThreadHandle(sentinel, global_epoch, bytes_gc_threshold,
-                                               bytes_epoch_threshold, control);
-                handles_table.insert({group, HandleWithControl(handle, control)});
-                group->handle_total.fetch_add(1);
-                return handle;
             }
+            
+            // clean unused thread handles;
+            clean_local_handles();
+
+            // allocate new ThreadHandle.
+            auto control = new ConcurrencyControl();
+            auto handle = new ThreadHandle(sentinel, global_epoch, bytes_gc_threshold,
+                                            bytes_epoch_threshold, control);
+            handles_table.insert({group, HandleWithControl(handle, control)});
+            group->handle_total.fetch_add(1);
+            return handle;
         }
 
         ~ThreadHandleAggregate() {
