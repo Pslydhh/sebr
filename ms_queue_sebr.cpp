@@ -48,7 +48,8 @@ public:
         Node* node = Head.load();
         for(;;) {
             Node* next = node->next.load();
-            delete node; // maybe change to "Node* local = node; delete local;" for VISUAL STUDIO.
+            auto local = node;
+            delete local;
             if (node == end) {
                 return ;
             }
