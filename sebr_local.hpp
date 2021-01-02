@@ -203,6 +203,7 @@ class PackedHandle {
 public:
     template <typename T>
     PackedHandle(ConcurrentBridge<T>* bridge);
+    PackedHandle(ThreadHandle* owed);
 
     template <typename T, typename... Args>
     void retire(long bytes, Args&&... args);
@@ -442,6 +443,10 @@ public:
     ConcurrentBridge(int bytes_gc_threshold = 8192, int bytes_epoch_threshold = 1024)
             : group(new ThreadGroup<T>(bytes_gc_threshold, bytes_epoch_threshold)) {}
 
+    ThreadHandle* bind() {
+        return group->bind();
+    }
+    
     ~ConcurrentBridge() {
         auto handle_num = group->handle_total.load();
         std::vector<ThreadHandle*> handles_capture;
@@ -503,6 +508,10 @@ private:
 
 template <typename T>
 PackedHandle::PackedHandle(ConcurrentBridge<T>* bridge) : owed(bridge->group->bind()) {
+    owed->lock_guard();
+}
+
+PackedHandle::PackedHandle(ThreadHandle* owed) : owed(owed) {
     owed->lock_guard();
 }
 
