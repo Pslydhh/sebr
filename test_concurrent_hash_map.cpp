@@ -1,5 +1,4 @@
 #include "concurrent_hash_map.hpp"
-#include "concurrent_ms_queue.hpp"
 #include <set>
 
 static int n_const = 10000000;
@@ -1474,161 +1473,6 @@ void test_scalable_hashtable(int i) {
     std::cout << "\n\n";
 }
 
-void test_scalable_queue_no_pin(int count, int num) {
-    ms_queue<int> queue, queue2;
-    std::vector<std::thread> threads;
-
-    {
-        auto beginTime = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < num; ++i) {
-            threads.emplace_back([&queue, &queue2, count, num] () -> void {
-                ThreadHandle* handle = queue.bind();
-                ThreadHandle* handle2 = queue2.bind();
-                for (int j = 0; j < (count / num); ++j) {
-                    queue.push2(53211, handle);
-                    queue2.push2(53211, handle2);
-                }
-            });
-        }
-        for (std::thread& th : threads) th.join();
-        threads.clear();
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime);
-        std::cout << "non pin local push elapsed time is " << elapsedTime.count() << " milliseconds" << std::endl;
-    }
-}
-
-void test_scalable_queue(int count, int num) {
-    ms_queue<int> queue, queue2;
-    std::vector<std::thread> threads;
-
-    {
-        auto beginTime = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < num; ++i) {
-            threads.emplace_back([&queue, &queue2, count, num] () -> void {
-                ThreadHandle* handle = queue.bind();
-                ThreadHandle* handle2 = queue2.bind();
-                for (int j = 0; j < (count / num); ++j) {
-                    queue.push(53211, handle);
-                    queue2.push(53211, handle2);
-                }
-            });
-        }
-        for (std::thread& th : threads) th.join();
-        threads.clear();
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime);
-        std::cout << "local push elapsed time is " << elapsedTime.count() << " milliseconds" << std::endl;
-    }
-
-    /*
-    {
-        auto beginTime = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < num; ++i) {
-            threads.emplace_back([&queue, &queue2, count, num] () -> void {
-                ThreadHandle* handle = queue.bind();
-                ThreadHandle* handle2 = queue2.bind();
-                for (int j = 0; j < (count / num) - 10; ++j) {
-                    int value;
-                    queue.pop(&value, handle);
-                    assert(value = 53211);
-                    queue2.pop(&value, handle2);
-                    assert(value = 53211);
-                }
-            });
-        }
-        for (std::thread& th : threads) th.join();
-        threads.clear();
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime);
-        std::cout << "local pop elapsed time is " << elapsedTime.count() << " milliseconds" << std::endl;
-    }
-    */
-
-    {
-        auto beginTime = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < num; ++i) {
-            threads.emplace_back([&queue, &queue2, count, num] () -> void {
-                for (int j = 0; j < (count / num); ++j) {
-                    queue.push(53211);
-                    queue2.push(53211);
-                }
-            });
-        }
-        for (std::thread& th : threads) th.join();
-        threads.clear();
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime);
-        std::cout << "push elapsed time is " << elapsedTime.count() << " milliseconds" << std::endl;
-    }
-    
-    /*
-    {
-        auto beginTime = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < num; ++i) {
-            threads.emplace_back([&queue, &queue2, count, num] () -> void {
-                for (int j = 0; j < (count / num) - 10; ++j) {
-                    int value;
-                    queue.pop(&value);
-                    assert(value = 53211);
-                    queue2.pop(&value);
-                    assert(value = 53211);
-                }
-            });
-        }
-        for (std::thread& th : threads) th.join();
-        threads.clear();
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime);
-        std::cout << "pop elapsed time is " << elapsedTime.count() << " milliseconds" << std::endl;
-    }
-    */
-}
-
-void test_scalable_queue2(int count, int num) {
-    ms_queue<int> queue;
-    std::vector<std::thread> threads;
-
-    {
-        auto beginTime = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < num; ++i) {
-            threads.emplace_back([&queue, count, num] () -> void {
-                ThreadHandle* handle = queue.bind();
-                for (int j = 0; j < (count / num); ++j) {
-                    queue.push(53211, handle);
-                    int value;
-                    queue.pop(&value, handle);
-                    assert(value == 53211);
-                }
-            });
-        }
-        for (std::thread& th : threads) th.join();
-        threads.clear();
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime);
-        std::cout << "local push/pop elapsed time is " << elapsedTime.count() << " milliseconds" << std::endl;
-    }
-
-    {
-        auto beginTime = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < num; ++i) {
-            threads.emplace_back([&queue, count, num] () -> void {
-                for (int j = 0; j < (count / num); ++j) {
-                    queue.push(53211);
-                    int value;
-                    queue.pop(&value);
-                    assert(value == 53211);
-                }
-            });
-        }
-        for (std::thread& th : threads) th.join();
-        threads.clear();
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime);
-        std::cout << "push/pop elapsed time is " << elapsedTime.count() << " milliseconds" << std::endl;
-    }
-}
-
 void test_russian_dolls() {
     std::cout << "Test ConcurrentHashMap with GC" << std::endl;
     ConcurrentHashMap<std::string, std::string> conMap;
@@ -1703,10 +1547,7 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < times; ++i) {
         std::thread thread([i]() -> void { 
             test_scalable_hashtable(i);
-            test_scalable_queue(n_const, nthreads_const);
-            test_scalable_queue_no_pin(n_const, nthreads_const);
-            test_scalable_queue(n_const, nthreads_const);
-            test_scalable_queue2(n_const, nthreads_const);
+            //test_scalable_queue(n_const, nthreads_const);
             test_russian_dolls();
         });
         thread.join();
