@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <iostream>
 #include <mutex>
@@ -25,7 +26,6 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
-#include <cstddef>
 
 namespace sebr {
 class Blocking {
@@ -126,11 +126,13 @@ public:
     static bool is_not_tagged(T* addr) { return !is_tagged(addr); }
 
     static T* tagged_address(T* plain_addr) {
-        return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(plain_addr) | static_cast<uintptr_t>(1));
+        return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(plain_addr) |
+                                    static_cast<uintptr_t>(1));
     }
 
     static T* untagged_address(T* tagged_addr) {
-        return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(tagged_addr) & static_cast<uintptr_t>(~1));
+        return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(tagged_addr) &
+                                    static_cast<uintptr_t>(~1));
     }
 
     T* sentinel;
@@ -348,8 +350,7 @@ class ThreadGroup {
         };
 
     public:
-        ThreadHandleAggregate()
-                : handles_table() {}
+        ThreadHandleAggregate() : handles_table() {}
 
         void clean_local_handles() {
             for (auto iter = handles_table.begin(); iter != handles_table.end(); ++iter) {
@@ -359,8 +360,9 @@ class ThreadGroup {
             }
         }
 
-        ThreadHandle* get_thread_handle(ThreadGroup<T>* group, ThreadHandle* sentinel, std::atomic<long>* global_epoch,
-                                        int bytes_gc_threshold, int bytes_epoch_threshold) {
+        ThreadHandle* get_thread_handle(ThreadGroup<T>* group, ThreadHandle* sentinel,
+                                        std::atomic<long>* global_epoch, int bytes_gc_threshold,
+                                        int bytes_epoch_threshold) {
             auto iter = handles_table.find(group);
             if (iter != handles_table.end()) {
                 int flag;
@@ -370,14 +372,14 @@ class ThreadGroup {
                     assert(flag < 0);
                 }
             }
-            
+
             // clean unused thread handles;
             clean_local_handles();
 
             // allocate new ThreadHandle.
             auto control = new ConcurrencyControl();
             auto handle = new ThreadHandle(sentinel, global_epoch, bytes_gc_threshold,
-                                            bytes_epoch_threshold, control);
+                                           bytes_epoch_threshold, control);
             handles_table.insert({group, HandleWithControl(handle, control)});
             group->handle_total.fetch_add(1);
             return handle;
@@ -424,7 +426,8 @@ public:
 
     ThreadHandle* bind() {
         thread_local ThreadHandleAggregate aggregate;
-        ThreadHandle* handle = aggregate.get_thread_handle(this, &sentinel, &global_epoch, bytes_gc_threshold, bytes_epoch_threshold);
+        ThreadHandle* handle = aggregate.get_thread_handle(
+                this, &sentinel, &global_epoch, bytes_gc_threshold, bytes_epoch_threshold);
         return handle;
     }
 
@@ -439,14 +442,13 @@ public:
 template <typename T>
 class ConcurrentBridge {
     friend class PackedHandle;
+
 public:
     ConcurrentBridge(int bytes_gc_threshold = 8192, int bytes_epoch_threshold = 1024)
             : group(new ThreadGroup<T>(bytes_gc_threshold, bytes_epoch_threshold)) {}
 
-    ThreadHandle* bind() {
-        return group->bind();
-    }
-    
+    ThreadHandle* bind() { return group->bind(); }
+
     ~ConcurrentBridge() {
         auto handle_num = group->handle_total.load();
         std::vector<ThreadHandle*> handles_capture;
