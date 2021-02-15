@@ -86,15 +86,15 @@ private:
 
 class RecWithEpoch {
     Base* recObj;
-    unsigned long epoch;
-    long bytes_rec;
+    uint64_t epoch;
+    int64_t bytes_rec;
 
 public:
-    RecWithEpoch(Base* recObj, long epoch, long bytes_rec)
+    RecWithEpoch(Base* recObj, int64_t epoch, int64_t bytes_rec)
             : recObj(recObj), epoch(epoch), bytes_rec(bytes_rec) {}
-    unsigned long getEpoch() { return epoch; }
+    uint64_t getEpoch() { return epoch; }
     Base* getRecObj() { return recObj; }
-    long getBytesForRec() { return bytes_rec; }
+    int64_t getBytesForRec() { return bytes_rec; }
 };
 
 template <typename T>
@@ -208,7 +208,7 @@ public:
     PackedHandle(ThreadHandle* owed);
 
     template <typename T, typename... Args>
-    void retire(long bytes, Args&&... args);
+    void retire(int64_t bytes, Args&&... args);
 
     ~PackedHandle();
 
@@ -218,16 +218,16 @@ private:
 
 class ConcurrencyControl {
 public:
-    ConcurrencyControl() : flag(0), blocking() {}
+    ConcurrencyControl(int32_t flag = 0) : flag(flag), blocking() {}
 
-    std::atomic<int> flag;
+    std::atomic<int32_t> flag;
     Blocking blocking;
 };
 
 class ThreadHandle : public NextWithUnpin<ThreadHandle> {
 public:
-    ThreadHandle(ThreadHandle* sentinel, std::atomic<long>* global_epoch_ptr,
-                 int bytes_gc_threshold, int bytes_epoch_threshold, ConcurrencyControl* control)
+    ThreadHandle(ThreadHandle* sentinel, std::atomic<int64_t>* global_epoch_ptr,
+                 int32_t bytes_gc_threshold, int32_t bytes_epoch_threshold)
             : NextWithUnpin(sentinel),
               epoch(-1),
               global_epoch_ptr(global_epoch_ptr),
@@ -236,7 +236,7 @@ public:
               bytes_gc_threshold(bytes_gc_threshold),
               bytes_epoch_threshold(bytes_epoch_threshold),
               epoch_add_lastbytes(0),
-              control(control) {
+              control() {
         this->pin();
     }
 
@@ -249,7 +249,7 @@ public:
               bytes_gc_threshold(0),
               bytes_epoch_threshold(0),
               epoch_add_lastbytes(0),
-              control(nullptr) {}
+              control() {}
 
     void unbind(std::function<void()> f) { this->unpin(f); }
 
@@ -264,7 +264,7 @@ public:
         return this;
     }
 
-    void try_increase_epoch(long bytes, std::atomic<long>* globalEpoch) {
+    void try_increase_epoch(int64_t bytes, std::atomic<int64_t>* globalEpoch) {
         if ((bytes_accumulate += bytes) - epoch_add_lastbytes > bytes_epoch_threshold) {
             globalEpoch->fetch_add(1);
             epoch_add_lastbytes = bytes_accumulate;
@@ -272,17 +272,17 @@ public:
     }
 
     template <typename T, typename... Args>
-    void retire(long bytes, Args&&... args) {
-        long epoch = global_epoch_ptr->load();
+    void retire(int64_t bytes, Args&&... args) {
+        int64_t epoch = global_epoch_ptr->load();
         try_increase_epoch(bytes += sizeof(T), global_epoch_ptr);
         heap_tabs.emplace_back(new T(std::forward<Args>(args)...), epoch, bytes);
     }
 
     void clean() {
-        int rec_num = 0;
+        int32_t rec_num = 0;
         for (auto& recObj : heap_tabs) {
             // reclaim unused memory.
-            long bytes_to_reclaim = recObj.getBytesForRec();
+            int64_t bytes_to_reclaim = recObj.getBytesForRec();
             auto rec = recObj.getRecObj();
             Base::reclaim(rec);
             bytes_accumulate -= bytes_to_reclaim;
@@ -291,27 +291,27 @@ public:
         heap_tabs.erase(heap_tabs.begin(), heap_tabs.begin() + rec_num);
     }
 
-    void reclaim(long threshold) {
+    void reclaim(int64_t threshold) {
         if (bytes_accumulate > threshold) {
             if (heap_tabs.empty()) return;
 
-            unsigned long min_epoch = global_epoch_ptr->load();
+            uint64_t min_epoch = global_epoch_ptr->load();
             if (heap_tabs[0].getEpoch() == min_epoch) {
                 return;
             }
 
             ThreadHandle* handle = sentinel->next.load();
             while (handle != sentinel) {
-                unsigned long th_epoch = handle->epoch.load();
+                uint64_t th_epoch = handle->epoch.load();
                 min_epoch = std::min(min_epoch, th_epoch);
                 handle = ThreadHandle::untagged_address(handle->next.load());
             }
 
-            int rec_num = 0;
+            int32_t rec_num = 0;
             for (RecWithEpoch& recObj : heap_tabs) {
                 if (recObj.getEpoch() >= min_epoch) break;
                 // reclaim unused memory.
-                long bytes_to_reclaim = recObj.getBytesForRec();
+                int64_t bytes_to_reclaim = recObj.getBytesForRec();
                 auto rec = recObj.getRecObj();
                 Base::reclaim(rec);
                 bytes_accumulate -= bytes_to_reclaim;
@@ -323,106 +323,113 @@ public:
 
 private:
     // local epoch for this thread.
-    std::atomic<long> epoch;
+    std::atomic<int64_t> epoch;
     // global epoch for this threads group.
-    std::atomic<long>* global_epoch_ptr;
+    std::atomic<int64_t>* global_epoch_ptr;
     std::vector<RecWithEpoch> heap_tabs;
-    long bytes_accumulate;
-    int bytes_gc_threshold;
-    int bytes_epoch_threshold;
-    long epoch_add_lastbytes;
-    constexpr static long LEAVE = -1;
+    int64_t bytes_accumulate;
+    int32_t bytes_gc_threshold;
+    int32_t bytes_epoch_threshold;
+    int64_t epoch_add_lastbytes;
+    constexpr static int64_t LEAVE = -1;
 
 public:
-    ConcurrencyControl* control;
+    ConcurrencyControl control;
+};
+
+class IdAllocator {
+public:
+    IdAllocator() : upper_bound(0), freed(), lock() {}
+    size_t allocate() {
+        std::lock_guard<std::mutex> guard(lock);
+        if (freed.empty()) {
+            return upper_bound++;
+        } else {
+            size_t id = freed.top();
+            freed.pop();
+            return id;
+        }
+    }
+
+    void deallocate(size_t id) {
+        std::lock_guard<std::mutex> guard(lock);
+        freed.push(id);
+    }
+
+private:
+    uint32_t upper_bound;
+    std::stack<uint32_t, std::vector<uint32_t>> freed;
+
+    // TODO: use concurrent_stack or concurrent_queue
+    std::mutex lock;
 };
 
 template <typename T>
 class ThreadGroup {
     class ThreadHandleAggregate {
-        class HandleWithControl {
-        public:
-            HandleWithControl(ThreadHandle* handle, ConcurrencyControl* control)
-                    : handle(handle), control(control) {}
-
-            ThreadHandle* handle;
-            ConcurrencyControl* control;
-        };
-
     public:
-        ThreadHandleAggregate() : handles_table() {}
-
-        void clean_local_handles() {
-            for (auto iter = handles_table.begin(); iter != handles_table.end(); ++iter) {
-                if (iter->second.control->flag.load() < 0) {
-                    handles_table.erase(iter);
-                }
-            }
-        }
+        ThreadHandleAggregate() : handles_vector() {}
 
         ThreadHandle* get_thread_handle(ThreadGroup<T>* group, ThreadHandle* sentinel,
-                                        std::atomic<long>* global_epoch, int bytes_gc_threshold,
-                                        int bytes_epoch_threshold) {
-            auto iter = handles_table.find(group);
-            if (iter != handles_table.end()) {
-                int flag;
-                if ((flag = iter->second.control->flag.load()) == 0) {
-                    return iter->second.handle;
-                } else {
-                    assert(flag < 0);
-                }
+                                        std::atomic<int64_t>* global_epoch,
+                                        int32_t bytes_gc_threshold, int32_t bytes_epoch_threshold) {
+            while (handles_vector.size() <= group->id) {
+                auto handle =
+                        reinterpret_cast<ThreadHandle*>(new std::uint8_t[sizeof(ThreadHandle)]);
+                new (&handle->control) ConcurrencyControl(-2);
+                handles_vector.push_back(handle);
             }
 
-            // clean unused thread handles;
-            clean_local_handles();
+            auto h = handles_vector[group->id];
+            if (h->control.flag.load() < 0) {
+                group->handle_total.fetch_add(1);
+                new (h) ThreadHandle(sentinel, global_epoch, bytes_gc_threshold,
+                                     bytes_epoch_threshold);
+            }
 
-            // allocate new ThreadHandle.
-            auto control = new ConcurrencyControl();
-            auto handle = new ThreadHandle(sentinel, global_epoch, bytes_gc_threshold,
-                                           bytes_epoch_threshold, control);
-            handles_table.insert({group, HandleWithControl(handle, control)});
-            group->handle_total.fetch_add(1);
-            return handle;
+            return h;
         }
 
         ~ThreadHandleAggregate() {
-            for (auto iter = handles_table.begin(); iter != handles_table.end(); ++iter) {
-                auto handle = iter->second.handle;
-                auto control = iter->second.control;
-                int flag = 0;
-                if (control->flag.load() == flag &&
-                    control->flag.compare_exchange_strong(flag, 1)) {
-                    handle->unbind([control]() -> void {
-                        control->flag.store(-1);
-                        control->blocking.unpark();
+            for (auto iter = handles_vector.begin(); iter != handles_vector.end(); ++iter) {
+                auto handle = *iter;
+                auto& control = handle->control;
+
+                int32_t flag = 0;
+                if (control.flag.load() == -2) {
+                    (&handle->control)->~ConcurrencyControl();
+                    delete[] reinterpret_cast<std::uint8_t*>(handle);
+                } else if (control.flag.load() == flag &&
+                           control.flag.compare_exchange_strong(flag, 1)) {
+                    handle->unbind([&control]() -> void {
+                        control.flag.store(-1);
+                        control.blocking.unpark();
                     });
                 } else {
                     do {
-                        control->blocking.park();
-                    } while (control->flag.load() > 0);
+                        control.blocking.park();
+                    } while (control.flag.load() > 0);
 
-                    delete control;
+                    // delete handle;
+                    handle->~ThreadHandle();
+                    delete[] reinterpret_cast<std::uint8_t*>(handle);
                 }
             }
         }
 
-        std::unordered_map<ThreadGroup<T>*, HandleWithControl> handles_table;
+        std::vector<ThreadHandle*> handles_vector;
     };
 
 public:
-    ThreadGroup(int bytes_gc_threshold, int bytes_epoch_threshold)
-            : sentinel(),
+    ThreadGroup(int32_t bytes_gc_threshold, int32_t bytes_epoch_threshold)
+            : id(id_allocator.allocate()),
+              sentinel(),
               global_epoch(0),
               bytes_gc_threshold(bytes_gc_threshold),
               bytes_epoch_threshold(bytes_epoch_threshold),
               handle_total(0) {}
 
-    ThreadGroup()
-            : sentinel(),
-              global_epoch(0),
-              bytes_gc_threshold(0),
-              bytes_epoch_threshold(0),
-              handle_total(0) {}
+    ~ThreadGroup() { deallocate(); }
 
     ThreadHandle* bind() {
         thread_local ThreadHandleAggregate aggregate;
@@ -431,44 +438,47 @@ public:
         return handle;
     }
 
+    void deallocate() { id_allocator.deallocate(id); }
+
 public:
+    static IdAllocator id_allocator;
+    const uint32_t id;
     ThreadHandle sentinel;
-    std::atomic<long> global_epoch;
-    const int bytes_gc_threshold;
-    const int bytes_epoch_threshold;
-    std::atomic<int> handle_total;
+    std::atomic<int64_t> global_epoch;
+    const int32_t bytes_gc_threshold;
+    const int32_t bytes_epoch_threshold;
+    std::atomic<int32_t> handle_total;
 };
+
+template <typename T>
+IdAllocator ThreadGroup<T>::id_allocator;
 
 template <typename T>
 class ConcurrentBridge {
     friend class PackedHandle;
 
 public:
-    ConcurrentBridge(int bytes_gc_threshold = 8192, int bytes_epoch_threshold = 1024)
+    ConcurrentBridge(int32_t bytes_gc_threshold = 8192, int32_t bytes_epoch_threshold = 1024)
             : group(new ThreadGroup<T>(bytes_gc_threshold, bytes_epoch_threshold)) {}
 
     ThreadHandle* bind() { return group->bind(); }
 
     ~ConcurrentBridge() {
         auto handle_num = group->handle_total.load();
-        std::vector<ThreadHandle*> handles_capture;
 
         auto sentinel = &group->sentinel;
         auto next = sentinel->next.load();
         while (next != sentinel) {
             auto temp_obj = ThreadHandle::untagged_address(next->next.load());
-            auto control = next->control;
-            int flag = 0;
-            if (control->flag.load() == flag && control->flag.compare_exchange_strong(flag, 1)) {
+            auto& control = next->control;
+            int32_t flag = 0;
+            if (control.flag.load() == flag && control.flag.compare_exchange_strong(flag, 1)) {
                 next->clean();
-                handles_capture.emplace_back(next);
                 --handle_num;
-                control->flag.store(-1);
-                control->blocking.unpark();
             } else {
                 do {
-                    control->blocking.park();
-                } while (control->flag.load() > 0);
+                    control.blocking.park();
+                } while (control.flag.load() > 0);
             }
             next = temp_obj;
         }
@@ -488,17 +498,21 @@ public:
             }
         }
 
+        next = sentinel->next.load();
+        while (next != sentinel) {
+            auto& control = next->control;
+            control.flag.store(-1);
+            control.blocking.unpark();
+            next = next->next.load();
+        }
+
         prev = sentinel->prev.load();
         while (prev != sentinel) {
             auto temp_obj = prev->prev.load();
             prev->clean();
-            delete prev->control;
-            delete prev;
+            prev->~ThreadHandle();
+            delete[] reinterpret_cast<std::uint8_t*>(prev);
             prev = temp_obj;
-        }
-
-        for (auto handle : handles_capture) {
-            delete handle;
         }
 
         delete group;
@@ -518,7 +532,7 @@ PackedHandle::PackedHandle(ThreadHandle* owed) : owed(owed) {
 }
 
 template <typename T, typename... Args>
-void PackedHandle::retire(long bytes, Args&&... args) {
+void PackedHandle::retire(int64_t bytes, Args&&... args) {
     owed->retire<T>(bytes, std::forward<Args>(args)...);
 }
 
