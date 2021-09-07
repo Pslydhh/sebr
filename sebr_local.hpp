@@ -23,6 +23,7 @@
 #include <mutex>
 #include <optional>
 #include <random>
+#include <stack>
 #include <thread>
 #include <unordered_map>
 #include <vector>
