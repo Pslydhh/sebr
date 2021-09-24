@@ -524,20 +524,20 @@ private:
 };
 
 template <typename T>
-PackedHandle::PackedHandle(ConcurrentBridge<T>* bridge) : owed(bridge->group->bind()) {
+inline PackedHandle::PackedHandle(ConcurrentBridge<T>* bridge) : owed(bridge->group->bind()) {
     owed->lock_guard();
 }
 
-PackedHandle::PackedHandle(ThreadHandle* owed) : owed(owed) {
+inline PackedHandle::PackedHandle(ThreadHandle* owed) : owed(owed) {
     owed->lock_guard();
 }
 
 template <typename T, typename... Args>
-void PackedHandle::retire(int64_t bytes, Args&&... args) {
+inline void PackedHandle::retire(int64_t bytes, Args&&... args) {
     owed->retire<T>(bytes, std::forward<Args>(args)...);
 }
 
-PackedHandle::~PackedHandle() {
+inline PackedHandle::~PackedHandle() {
     owed->unguard();
 }
 
